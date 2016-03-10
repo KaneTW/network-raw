@@ -26,6 +26,10 @@ library
                 , bytestring
                 , binary
                 , binary-bits
+                , binary-conduit
+                , conduit
+                , conduit-extra
+                , exceptions
                 , ioctl
                 , network
     default-language: Haskell2010

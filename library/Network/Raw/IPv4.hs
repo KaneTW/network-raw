@@ -2,9 +2,12 @@
 module Network.Raw.IPv4 where
 
 import Control.Monad
+import Control.Monad.Catch
 import Data.Binary (Get)
 import Data.Binary.Bits.Get
 import Data.ByteString (ByteString)
+import Data.Conduit
+import Data.Conduit.Serialization.Binary
 --import qualified Data.ByteString as BS
 import Data.Word
 
@@ -12,19 +15,39 @@ type IPv4Address = Word32
 
 -- |Minimum amount of information to reassemble a IP packet.
 -- Potentially fragmented.
-data RawIPv4Packet = RawIPv4Packet { ipSrcAddress     :: !IPv4Address
-                                   , ipDstAddress     :: !IPv4Address
-                                   , ipIdent          :: !Word16
-                                   , ipDontFragment   :: !Bool
-                                   , ipMoreFragments  :: !Bool
-                                   , ipFragmentOffset :: !Word16
-                                   , ipProtocol       :: !Word8
-                                   , ipBody           :: !ByteString
-                                   }
-                   deriving (Show, Eq)
+data IPv4Packet = IPv4Packet { ipSrcAddress     :: !IPv4Address
+                             , ipDstAddress     :: !IPv4Address
+                             , ipIdent          :: !Word16
+                             , ipDontFragment   :: !Bool
+                             , ipMoreFragments  :: !Bool
+                             , ipFragmentOffset :: !Word16
+                             , ipBody           :: !IPBody
+                             }
+                deriving (Show, Eq)
 
-getRawIPv4Packet :: Get RawIPv4Packet
-getRawIPv4Packet = runBitGet $ do
+data TCPPacket = TCPPacket { tcpSrcPort   :: !Word16
+                           , tcpDstPort   :: !Word16
+                           , tcpSeqNumber :: !Word32
+                           , tcpAckNumber :: !Word32
+                           , tcpNs :: !Bool
+                           , tcpCwr :: !Bool
+                           , tcpEce :: !Bool
+                           , tcpUrg :: !Bool
+                           , tcpAck :: !Bool
+                           , tcpPsh :: !Bool
+                           , tcpRst :: !Bool
+                           , tcpSyn :: !Bool
+                           , tcpFin :: !Bool
+                           , tcpWindowSize  :: !Word16
+                           , tcpBody :: !ByteString
+                           }
+               deriving (Show, Eq)
+
+data IPBody = TCPBody !TCPPacket | UnknownBody !Word8 !ByteString
+            deriving (Show, Eq)
+
+getIPv4Packet :: Get IPv4Packet
+getIPv4Packet = runBitGet $ do
   version <- getWord8 4
   when (version /= 4) $ fail "Incorrect IP version"
   
@@ -45,12 +68,52 @@ getRawIPv4Packet = runBitGet $ do
   src <- getWord32be 32
   dst <- getWord32be 32
 
-  let remainingHeader = (fromIntegral headerLength) - 5
+  let remainingHeader = 4 * ((fromIntegral headerLength) - 5)
   _ <- getByteString remainingHeader
   
   let bodySize = (fromIntegral totalLength) - 4 * (fromIntegral headerLength)
-  body <- getByteString bodySize
   
-  return $ RawIPv4Packet src dst ident df mf frags proto body
+  if proto == 6 then do
+    tcp <- getTCPPacket bodySize
+    return $ IPv4Packet src dst ident df mf frags proto (TCPBody tcp)
+  else do
+    body <- getByteString bodySize
+    return $ IPv4Packet src dst ident df mf frags proto (UnknownBody proto body)
 
-  
+  where
+    getTCPPacket ipBodySize = do
+      src <- getWord16be 16
+      dst <- getWord16be 16
+      seqNumber <- getWord32be 32
+      ackNumber <- getWord32be 32
+      dataOffset <- getWord8 4
+      when (dataOffset < 5) $ fail "Incorrect data offset"
+
+      _ <- getWord8 3 -- reserved
+      ns <- getBool
+      cwr <- getBool
+      ece <- getBool
+      urg <- getBool
+      ack <- getBool
+      psh <- getBool
+      rst <- getBool
+      syn <- getBool
+      fin <- getBool
+      window <- getWord16be 16
+      _ <- getWord16be 16 -- checksum
+      _ <- getWord16be 16 -- urgent pointer
+
+      let remainingHeader = 4 * ((fromIntegral dataOffset) - 5)
+      _ <- getByteString remainingHeader
+
+      let bodySize = ipBodySize - 4 * (fromIntegral dataOffset) 
+      body <- getByteString bodySize
+      return $ TCPPacket src dst seqNumber ackNumber ns cwr ece urg ack psh rst syn fin window body
+
+toTCPPacket :: IPv4Packet -> Maybe TCPPacket
+toTCPPacket pck = case ipBody pck of 
+  TCPBody tcp -> Just tcp
+  _ -> Nothing
+
+conduitIPv4 :: MonadThrow m => Conduit ByteString m IPv4Packet
+conduitIPv4 = conduitGet getIPv4Packet

@@ -23,7 +23,7 @@ instance IOControl (Proxy RcvAll) RcvAll where
   ioctlReq _ = 2550136833
 
 mkRcvAllSocket :: HostAddress -- ^ local address to bind to
-                  -> IO Socket
+               -> IO Socket
 mkRcvAllSocket addr = do
   sock <- socket AF_INET Raw defaultProtocol
   bind sock $ SockAddrInet 0 addr
