@@ -25,7 +25,9 @@ data IPv4Packet = IPv4Packet { ipSrcAddress     :: !IPv4Address
                              }
                 deriving (Show, Eq)
 
-data TCPPacket = TCPPacket { tcpSrcPort   :: !Word16
+data TCPPacket = TCPPacket { tcpSrcAddress :: !IPv4Address
+                           , tcpDstAddress :: !IPv4Address
+                           , tcpSrcPort   :: !Word16
                            , tcpDstPort   :: !Word16
                            , tcpSeqNumber :: !Word32
                            , tcpAckNumber :: !Word32
@@ -74,16 +76,16 @@ getIPv4Packet = runBitGet $ do
   let bodySize = (fromIntegral totalLength) - 4 * (fromIntegral headerLength)
   
   if proto == 6 then do
-    tcp <- getTCPPacket bodySize
-    return $ IPv4Packet src dst ident df mf frags proto (TCPBody tcp)
+    tcp <- getTCPPacket src dst bodySize
+    return $ IPv4Packet src dst ident df mf frags (TCPBody tcp)
   else do
     body <- getByteString bodySize
-    return $ IPv4Packet src dst ident df mf frags proto (UnknownBody proto body)
+    return $ IPv4Packet src dst ident df mf frags (UnknownBody proto body)
 
   where
-    getTCPPacket ipBodySize = do
-      src <- getWord16be 16
-      dst <- getWord16be 16
+    getTCPPacket srcAddr dstAddr ipBodySize = do
+      srcPort <- getWord16be 16
+      dstPort <- getWord16be 16
       seqNumber <- getWord32be 32
       ackNumber <- getWord32be 32
       dataOffset <- getWord8 4
@@ -108,7 +110,7 @@ getIPv4Packet = runBitGet $ do
 
       let bodySize = ipBodySize - 4 * (fromIntegral dataOffset) 
       body <- getByteString bodySize
-      return $ TCPPacket src dst seqNumber ackNumber ns cwr ece urg ack psh rst syn fin window body
+      return $ TCPPacket srcAddr dstAddr srcPort dstPort seqNumber ackNumber ns cwr ece urg ack psh rst syn fin window body
 
 toTCPPacket :: IPv4Packet -> Maybe TCPPacket
 toTCPPacket pck = case ipBody pck of 
