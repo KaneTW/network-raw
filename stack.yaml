@@ -2,8 +2,8 @@ flags: {}
 extra-package-dbs: []
 packages:
 - '.'
+- third-party/ioctl
 extra-deps:
 - binary-bits-0.5
-- ioctl-0.0.1
 - text-1.2.2.0
 resolver: lts-5.6
