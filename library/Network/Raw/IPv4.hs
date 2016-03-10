@@ -5,7 +5,7 @@ import Control.Monad
 import Data.Binary (Get)
 import Data.Binary.Bits.Get
 import Data.ByteString (ByteString)
-import qualified Data.ByteString as BS
+--import qualified Data.ByteString as BS
 import Data.Word
 
 type IPv4Address = Word32
