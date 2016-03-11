@@ -8,6 +8,7 @@ import Data.Binary.Bits.Get
 import Data.ByteString (ByteString)
 import Data.Conduit
 import Data.Conduit.Serialization.Binary
+import qualified Data.Conduit.Combinators as CC
 --import qualified Data.ByteString as BS
 import Data.Word
 
@@ -119,3 +120,6 @@ toTCPPacket pck = case ipBody pck of
 
 conduitIPv4 :: MonadThrow m => Conduit ByteString m IPv4Packet
 conduitIPv4 = conduitGet getIPv4Packet
+
+conduitTCP :: MonadThrow m => Conduit IPv4Packet m TCPPacket
+conduitTCP = CC.concatMap toTCPPacket

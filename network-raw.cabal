@@ -28,6 +28,7 @@ library
                 , binary-bits
                 , binary-conduit
                 , conduit
+                , conduit-combinators
                 , conduit-extra
                 , exceptions
                 , ioctl
