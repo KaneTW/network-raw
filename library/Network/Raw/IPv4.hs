@@ -1,10 +1,9 @@
-{-# LANGUAGE RecordWildCards, TemplateHaskell #-}
+{-# LANGUAGE RecordWildCards, TemplateHaskell, FlexibleContexts #-}
 module Network.Raw.IPv4 where
 
 import Control.Lens
 import Control.Monad
 import Control.Monad.Catch
-import Control.Monad.State
 import Data.Binary (Get)
 import Data.Binary.Bits.Get
 import Data.ByteString (ByteString)
@@ -157,12 +156,25 @@ initialStreamState = TCPStreamState Nothing M.empty
 conduitTCPStream :: MonadThrow m => TCPStreamId -> Conduit TCPPacket m ByteString
 conduitTCPStream stream = CC.filter (\x -> stream == streamOf x) =$= reconstructStream
  where
+  pushPacket pack = do
+    let nextSeq = pack^.tcpSeqNumber + fromIntegral (BS.length $ pack^.tcpBody)
+    streamNextSeq .= Just nextSeq
+    yield $ pack^.tcpBody
+    prevQueue <- use streamPacketQueue
+    
+    when (M.member nextSeq prevQueue) $ do
+      -- maybe i should use a queue instead of a map...wtf
+      streamPacketQueue %= M.delete nextSeq
+      let Just queuePack = M.lookup nextSeq prevQueue
+      pushPacket queuePack
+    
   reconstructStream = evalStateC initialStreamState $ awaitForever $ \pack -> do
-    prev <- get
-    case prev^.streamNextSeq of
+    prev <- use streamNextSeq
+    case prev of
       Just prevSeq | prevSeq < pack^.tcpSeqNumber -> do -- we're missing a packet, add to queue
                        streamPacketQueue %= M.insert (pack^.tcpSeqNumber) pack
                    | prevSeq > pack^.tcpSeqNumber -> return () -- discard packets where we saw a later packet first
-      _ -> do
-        streamNextSeq .= Just (pack^.tcpSeqNumber + fromIntegral (BS.length $ pack^.tcpBody))
-        yield $ pack^.tcpBody
+      _ -> pushPacket pack
+
+
+        
