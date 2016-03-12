@@ -156,25 +156,31 @@ initialStreamState = TCPStreamState Nothing M.empty
 conduitTCPStream :: MonadThrow m => TCPStreamId -> Conduit TCPPacket m ByteString
 conduitTCPStream stream = CC.filter (\x -> stream == streamOf x) =$= reconstructStream
  where
+  -- TODO: unbounded growth in memory if the 'prevSeq < tcpSeqNumber' case occurs forever (shouldn't, but who knows)
+  -- TODO: yell when we get the '>' case instead of ignoring packets silently
+  reconstructStream = evalStateC initialStreamState $ awaitForever $ \pack -> do
+    prev <- use streamNextSeq
+    case prev of
+      Just prevSeq | prevSeq < pack^.tcpSeqNumber
+                   -- we're missing a packet, add to queue
+                   -> streamPacketQueue %= M.insert (pack^.tcpSeqNumber) pack
+                   
+                   | prevSeq > pack^.tcpSeqNumber
+                   -- discard packets where we saw a later packet first
+                   -> return ()
+      -- either we have no previous packet, or we have the proper sequence number
+      _ -> pushPacket pack
+
   pushPacket pack = do
     let nextSeq = pack^.tcpSeqNumber + fromIntegral (BS.length $ pack^.tcpBody)
     streamNextSeq .= Just nextSeq
     yield $ pack^.tcpBody
     prevQueue <- use streamPacketQueue
-    
-    when (M.member nextSeq prevQueue) $ do
-      -- maybe i should use a queue instead of a map...wtf
-      streamPacketQueue %= M.delete nextSeq
-      let Just queuePack = M.lookup nextSeq prevQueue
-      pushPacket queuePack
-    
-  reconstructStream = evalStateC initialStreamState $ awaitForever $ \pack -> do
-    prev <- use streamNextSeq
-    case prev of
-      Just prevSeq | prevSeq < pack^.tcpSeqNumber -> do -- we're missing a packet, add to queue
-                       streamPacketQueue %= M.insert (pack^.tcpSeqNumber) pack
-                   | prevSeq > pack^.tcpSeqNumber -> return () -- discard packets where we saw a later packet first
-      _ -> pushPacket pack
-
+    case M.lookup nextSeq prevQueue of
+      Just queuePack -> do
+        -- maybe i should use a queue instead of a map...wtf
+        streamPacketQueue %= M.delete nextSeq
+        pushPacket queuePack
+      _ -> return ()
 
         
